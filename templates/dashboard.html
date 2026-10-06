@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PC System Monitor</title>
+<style>
+  :root {
+    --bg: #1E1E1E; --fg: #E0E0E0; --fg-dim: #888888; --graph-bg: #2A2A2A; --card: #232323;
+    --accent-cpu: #4FC3F7; --accent-ram: #81C784; --accent-gpu: #FFB74D; --accent-disk: #CE93D8;
+    --accent-net-down: #42A5F5; --accent-net-up: #EF5350;
+    --font: "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 14px; }
+  button, select, input { font-family: inherit; font-size: 13px; }
+  header {
+    position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--bg); border-bottom: 1px solid var(--graph-bg);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  .status { margin-left: 14px; font-size: 12px; color: var(--fg-dim); }
+  .status.offline { color: #F44336; font-weight: 600; }
+  main { max-width: 1120px; margin: 0 auto; padding: 20px 24px 48px; }
+
+  .btn { background: var(--graph-bg); color: var(--fg); border: 1px solid transparent; border-radius: 6px;
+         padding: 6px 14px; cursor: pointer; }
+  .btn:hover { border-color: var(--fg-dim); }
+  .btn.primary { background: var(--accent-cpu); color: #111; font-weight: 600; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--graph-bg); border-radius: 10px; padding: 14px 16px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .card-head h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .4px; }
+  .toggles { display: flex; gap: 14px; font-size: 12px; color: var(--fg-dim); }
+  .toggles label { display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+  .row { display: flex; gap: 16px; align-items: flex-start; }
+  .row .left { flex: 1; min-width: 0; }
+  .big { font-size: 28px; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .big.two { font-size: 22px; }
+  .sub { margin-top: 3px; font-size: 12px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+  canvas.graph { flex: none; width: 240px; height: 72px; background: var(--graph-bg); border-radius: 4px; }
+  .bar { height: 6px; margin-top: 10px; background: var(--graph-bg); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; transition: width .4s ease; }
+  .cores { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px 10px; margin-top: 12px; }
+  .cores .bar { height: 4px; margin: 0; }
+
+  .disks { margin-top: 16px; }
+  .disk-row { display: grid; grid-template-columns: 44px 1fr 150px 56px 170px 64px; gap: 12px; align-items: center;
+              padding: 7px 0; border-bottom: 1px solid var(--graph-bg); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .disk-row:last-child { border-bottom: none; }
+  .disk-row .bar { margin: 0; }
+  .disk-name { font-weight: 700; color: var(--accent-disk); }
+  .dim { color: var(--fg-dim); }
+  .right { text-align: right; }
+
+  #settings { margin-bottom: 16px; }
+  /* minmax(0, 1fr): 넓은 미리보기 이미지가 열을 늘려 옆 섹션을 덮지 않도록 (캡처로 확인된 문제) */
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr)); gap: 8px 32px; }
+  .settings-section { min-width: 0; }
+  .settings-section h3 { margin: 14px 0 8px; font-size: 13px; }
+  .hint { margin-left: 6px; font-size: 11px; font-weight: 400; color: var(--fg-dim); }
+  .field { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+  .field > .name { width: 150px; flex: none; color: var(--fg-dim); font-size: 13px; }
+  select, input[type=number], input[type=text] {
+    background: var(--graph-bg); color: var(--fg); border: 1px solid #444; border-radius: 4px; padding: 4px 6px;
+  }
+  input[type=number] { width: 70px; }
+  input[type=color] { width: 36px; height: 24px; padding: 0; border: 1px solid #444; background: none; }
+  .colors { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px; }
+  .colors .field > .name { width: 90px; }
+  .style-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .style-option { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 10px;
+                  border: 1px solid var(--graph-bg); border-radius: 8px; cursor: pointer; }
+  .style-option.selected { border-color: var(--accent-cpu); background: rgba(79, 195, 247, .06); }
+  .style-option .title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  .style-option .desc { font-size: 11px; color: var(--fg-dim); }
+  .previews { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; min-height: 48px; }
+  .previews img { display: block; max-width: 100%; height: auto; }
+  /* 확대 이미지는 상자 폭을 넘으면 비율을 유지한 채 줄어든다 (픽셀 느낌 유지) */
+  .previews img.zoom { image-rendering: pixelated; }
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  .message { font-size: 12px; }
+  .message.error { color: #F44336; }
+  .message.ok { color: #81C784; }
+
+  @media (max-width: 720px) {
+    .grid, .settings-grid { grid-template-columns: 1fr; }
+    canvas.graph { width: 160px; }
+    .disk-row { grid-template-columns: 40px 1fr 60px 64px; }
+    .disk-row .wide { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;align-items:center">
+    <h1>PC System Monitor</h1>
+    <span id="conn" class="status">연결 중…</span>
+  </div>
+  <button id="settings-toggle" class="btn" type="button">⚙ Settings</button>
+</header>
+
+<main>
+  <section id="settings" class="card" hidden>
+    <div class="settings-grid">
+      <div class="settings-section">
+        <h3>오버레이 디자인<span class="hint">선택 즉시 적용 · 모든 모니터 공통</span></h3>
+        <div class="style-options" id="style-options"></div>
+        <div class="field"><span class="name">오버레이 크기</span>
+          <input type="range" id="overlay-size" min="24" max="40" step="1"><span id="overlay-size-value"></span>
+        </div>
+        <div class="field"><span class="name">오버레이 글꼴</span><select id="overlay-font"></select></div>
+
+        <h3>시작<span class="hint">선택 즉시 적용</span></h3>
+        <div class="field"><span class="name">자동 실행</span>
+          <label><input type="checkbox" id="auto-start"> Windows 시작 시 자동 실행</label>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>화면<span class="hint">저장 버튼으로 적용</span></h3>
+        <div class="field"><span class="name">글꼴</span><select id="font-family" data-dirty></select></div>
+        <div class="field"><span class="name">글자 크기 (제목/값/작게)</span>
+          <input type="number" id="font-size-title" min="6" max="32" data-dirty>
+          <input type="number" id="font-size-value" min="6" max="32" data-dirty>
+          <input type="number" id="font-size-small" min="6" max="32" data-dirty>
+        </div>
+        <div class="field"><span class="name">섹션 간격 (px)</span><input type="number" id="section-gap" min="0" max="50" data-dirty></div>
+        <div class="field"><span class="name">갱신 주기</span>
+          <input type="range" id="interval" min="1" max="10" step="1" data-dirty><span id="interval-value"></span>
+        </div>
+        <div class="colors" id="color-fields"></div>
+
+        <h3>알림<span class="hint">저장 버튼으로 적용</span></h3>
+        <div class="field"><span class="name">알림 사용</span><label><input type="checkbox" id="alerts-enabled" data-dirty> 켜기</label>
+          <button id="alert-test" class="btn" type="button">테스트 알림 보내기</button>
+        </div>
+        <div id="threshold-fields"></div>
+
+        <div class="actions">
+          <button id="save" class="btn primary" type="button">저장</button>
+          <button id="revert" class="btn" type="button">되돌리기</button>
+          <span id="save-message" class="message"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-head">
+        <h2 style="color:var(--accent-cpu)">CPU</h2>
+        <div class="toggles"><label><input type="checkbox" data-item="cpu"> tray</label></div>
+      </div>
+      <div class="row">
+        <div class="left">
+          <div class="big" id="cpu-value">--</div>
+          <div class="bar"><div id="cpu-bar"></div></div>
+        </div>
+        <canvas class="graph" id="graph-cpu"></canvas>
+      </div>
+      <div class="cores" id="cpu-cores"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 style="color:var(--accent-ram)">RAM</h2>
+        <div class="toggles"><label><input type="checkbox" data-item="ram"> tray</label></div>
+      </div>
+      <div class="row">
+        <div class="left">
+          <div class="big" id="ram-value">--</div>
+          <div class="sub" id="ram-sub"></div>
+          <div class="bar"><div id="ram-bar"></div></div>
+        </div>
+        <canvas class="graph" id="graph-ram"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 style="color:var(--accent-gpu)">GPU</h2>
+        <div class="toggles">
+          <label><input type="checkbox" data-item="gpu"> 사용률 tray</label>
+          <label><input type="checkbox" data-item="gpu_temp"> 온도 tray</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="left">
+          <div class="big" id="gpu-value">--</div>
+          <div class="sub" id="gpu-name"></div>
+          <div class="sub" id="gpu-vram"></div>
+          <div class="bar"><div id="gpu-bar"></div></div>
+        </div>
+        <canvas class="graph" id="graph-gpu"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2 style="color:var(--accent-net-down)">Network</h2>
+        <div class="toggles">
+          <label><input type="checkbox" data-item="net_down"> ↓ 다운로드 tray</label>
+          <label><input type="checkbox" data-item="net_up"> ↑ 업로드 tray</label>
+        </div>
+      </div>
+      <div class="row">
+        <div class="left">
+          <div class="big two" id="net-down">--</div>
+          <div class="big two" id="net-up">--</div>
+          <div class="sub" id="net-today"></div>
+        </div>
+        <canvas class="graph" id="graph-net"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card disks">
+    <div class="card-head"><h2 style="color:var(--accent-disk)">Disks</h2></div>
+    <div id="disk-rows"><div class="dim">수집 중…</div></div>
+  </div>
+</main>
+
+<script>const INITIAL_CONFIG = {{ initial_config | tojson }};</script>
+<script>
+"use strict";
+
+const HISTORY_SEC = 60;
+const PREVIEW_REFRESH_MS = 3000;
+const CONFIG_REFRESH_MS = 5000;
+const LOOK_OPTIONS = [
+  { value: "label", title: "라벨형", desc: "위 라벨 + 아래 숫자 + 부하 색 막대" },
+  { value: "badge", title: "배지형", desc: "부하 색으로 채운 사각형 + 흰 글자" },
+  { value: "gauge", title: "게이지형", desc: "값만큼 아래에서 차오르는 사각형" },
+  { value: "ring", title: "원형 링", desc: "값만큼 호가 채워지는 원" },
+  { value: "spark", title: "미니 그래프형", desc: "최근 60초 추이 + 수치" },
+  { value: "text", title: "두 줄 텍스트", desc: "칸 없이 글자 두 줄" },
+];
+const COLOR_FIELDS = [
+  ["bg", "배경"], ["fg", "글자"], ["fg_dim", "보조 글자"], ["graph_bg", "그래프 배경"],
+  ["accent_cpu", "CPU"], ["accent_ram", "RAM"], ["accent_gpu", "GPU"], ["accent_disk", "디스크"],
+  ["accent_net_down", "다운로드"], ["accent_net_up", "업로드"],
+];
+const THRESHOLD_FIELDS = [
+  ["cpu_percent", "CPU 사용률 (%)", 1, 100], ["cpu_duration_sec", "CPU 지속 시간 (초)", 1, 600],
+  ["ram_percent", "RAM 사용률 (%)", 1, 100], ["gpu_temp", "GPU 온도 (°C)", 30, 110],
+  ["disk_percent", "디스크 사용률 (%)", 1, 100],
+];
+const CSS_VARS = {
+  bg: "--bg", fg: "--fg", fg_dim: "--fg-dim", graph_bg: "--graph-bg", accent_cpu: "--accent-cpu",
+  accent_ram: "--accent-ram", accent_gpu: "--accent-gpu", accent_disk: "--accent-disk",
+  accent_net_down: "--accent-net-down", accent_net_up: "--accent-net-up",
+};
+
+let config = INITIAL_CONFIG;
+let history = [];
+let latest = null;
+let online = true;
+let formDirty = false;
+let fontNames = [];
+let diskKey = "";
+let previewTimer = null;
+
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------- 서식
+
+function formatRate(kb) {
+  if (kb < 1024) return `${Math.round(kb)} KB/s`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1)} MB/s`;
+  return `${(mb / 1024).toFixed(1)} GB/s`;
+}
+function formatAmountMb(mb) { return mb < 1024 ? `${Math.round(mb)} MB` : `${(mb / 1024).toFixed(1)} GB`; }
+function formatSizeGb(gb) { return Number.isInteger(gb) ? `${gb}` : gb.toFixed(1); }
+function formatDiskRate(v) { return v === null || v === undefined ? "-" : (v < 10 ? `${v.toFixed(1)}MB/s` : `${Math.round(v)}MB/s`); }
+function levelColor(v) { return v <= 50 ? "#4CAF50" : v <= 80 ? "#FF9800" : "#F44336"; }
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function mixHex(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return "#" + pa.map((v, i) => Math.round(v * t + pb[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
+}
+
+function applyTheme(theme) {
+  const style = document.documentElement.style;
+  for (const [key, name] of Object.entries(CSS_VARS)) style.setProperty(name, theme[key]);
+  style.setProperty("--card", mixHex(theme.bg, theme.graph_bg, 0.6));
+  style.setProperty("--font", `"${String(theme.font_family).replace(/["\\]/g, "")}", "Segoe UI", sans-serif`);
+  drawGraphs();
+}
+
+// ---------------------------------------------------------------- 상태 표시
+
+function setBar(el, percent, color) {
+  el.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  el.style.background = percent > 80 ? levelColor(percent) : color;
+}
+
+function renderStatus(d) {
+  if (d.cpu) {
+    $("cpu-value").textContent = `${d.cpu.percent.toFixed(1)}%`;
+    setBar($("cpu-bar"), d.cpu.percent, cssVar("--accent-cpu"));
+    renderCores(d.cpu.per_core);
+  } else {
+    $("cpu-value").textContent = "N/A";
+  }
+
+  if (d.ram) {
+    $("ram-value").textContent = `${Math.round(d.ram.percent)}%`;
+    $("ram-sub").textContent = `${d.ram.used_gb.toFixed(1)} / ${d.ram.total_gb.toFixed(1)} GB`;
+    setBar($("ram-bar"), d.ram.percent, cssVar("--accent-ram"));
+  } else {
+    $("ram-value").textContent = "N/A";
+  }
+
+  if (d.gpu) {
+    $("gpu-value").textContent = `${d.gpu.temp}°C · ${d.gpu.percent}%`;
+    $("gpu-name").textContent = d.gpu.name;
+    $("gpu-vram").textContent = `VRAM ${d.gpu.vram_used_gb.toFixed(1)} / ${d.gpu.vram_total_gb.toFixed(1)} GB`;
+    setBar($("gpu-bar"), d.gpu.vram_used_gb / d.gpu.vram_total_gb * 100, cssVar("--accent-gpu"));
+  } else {
+    $("gpu-value").textContent = "N/A";
+    $("gpu-name").textContent = "GPU 정보를 가져올 수 없습니다";
+    $("gpu-vram").textContent = "";
+  }
+
+  if (d.network) {
+    $("net-down").textContent = `↓ ${formatRate(d.network.download_kb_s)}`;
+    $("net-up").textContent = `↑ ${formatRate(d.network.upload_kb_s)}`;
+    $("net-today").textContent =
+      `오늘 ↓ ${formatAmountMb(d.network.today_download_mb)}   ↑ ${formatAmountMb(d.network.today_upload_mb)}`;
+  }
+
+  renderDisks(d.disks || []);
+  syncItemCheckboxes();
+}
+
+function renderCores(perCore) {
+  const container = $("cpu-cores");
+  if (container.children.length !== perCore.length) {
+    container.replaceChildren(...perCore.map(() => {
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.appendChild(document.createElement("div"));
+      return bar;
+    }));
+  }
+  const accent = cssVar("--accent-cpu");
+  perCore.forEach((p, i) => setBar(container.children[i].firstChild, p, accent));
+}
+
+function renderDisks(disks) {
+  const container = $("disk-rows");
+  const key = disks.map((d) => d.mount).join("|");
+  if (key !== diskKey) {
+    diskKey = key;
+    container.replaceChildren(...disks.map((d) => {
+      const row = document.createElement("div");
+      row.className = "disk-row";
+      const cells = {
+        name: ["disk-name", d.mount.replace(/\\$/, "")], bar: ["bar", ""], size: ["wide dim", ""],
+        pct: ["right", ""], io: ["wide dim", ""], tray: ["toggles", ""],
+      };
+      for (const [role, [cls, text]] of Object.entries(cells)) {
+        const cell = document.createElement("div");
+        cell.className = cls;
+        cell.dataset.role = role;
+        cell.textContent = text;
+        row.appendChild(cell);
+      }
+      row.querySelector('[data-role="bar"]').appendChild(document.createElement("div"));
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.item = `disk:${d.mount}`;
+      label.append(box, " tray");
+      row.querySelector('[data-role="tray"]').appendChild(label);
+      return row;
+    }));
+    if (!disks.length) container.innerHTML = '<div class="dim">감지된 드라이브가 없습니다</div>';
+  }
+  const accent = cssVar("--accent-disk");
+  disks.forEach((d, i) => {
+    const row = container.children[i];
+    if (!row || !row.classList.contains("disk-row")) return;
+    setBar(row.querySelector('[data-role="bar"]').firstChild, d.percent, accent);
+    row.querySelector('[data-role="size"]').textContent = `${formatSizeGb(d.used_gb)} / ${formatSizeGb(d.total_gb)} GB`;
+    row.querySelector('[data-role="pct"]').textContent = `${d.percent.toFixed(1)}%`;
+    row.querySelector('[data-role="io"]').textContent = `R ${formatDiskRate(d.read_mb_s)}   W ${formatDiskRate(d.write_mb_s)}`;
+  });
+}
+
+// ---------------------------------------------------------------- 그래프
+
+function seriesValue(sample, key) {
+  if (key === "net_down") return sample.network ? sample.network.download_kb_s : null;
+  if (key === "net_up") return sample.network ? sample.network.upload_kb_s : null;
+  return sample[key] ? sample[key].percent : null;
+}
+
+function drawGraph(canvas, lines, auto) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const now = Date.now() / 1000;
+  let vmax = 100;
+  if (auto) {
+    let max = 0;
+    for (const s of history) for (const l of lines) {
+      const v = seriesValue(s, l.key);
+      if (v !== null && v > max) max = v;
+    }
+    vmax = Math.max(max * 1.15, 64);
+  }
+
+  const segmentsFor = (key) => {
+    const segments = [];
+    let current = [];
+    for (const s of history) {
+      const age = now - s.timestamp;
+      if (age > HISTORY_SEC) continue;
+      const v = seriesValue(s, key);
+      if (v === null) { if (current.length) segments.push(current); current = []; continue; }
+      const x = (w - 1) - Math.max(0, age) / HISTORY_SEC * (w - 1);
+      const y = (h - 1) - Math.min(Math.max(v, 0) / vmax, 1) * (h - 2);
+      current.push([x, y]);
+    }
+    if (current.length) segments.push(current);
+    return segments;
+  };
+
+  const drawn = lines.map((l) => ({ color: cssVar(l.color), segments: segmentsFor(l.key) }));
+  for (const pass of ["fill", "line"]) {
+    for (const { color, segments } of drawn) {
+      for (const seg of segments) {
+        if (seg.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(seg[0][0], seg[0][1]);
+        for (const [x, y] of seg.slice(1)) ctx.lineTo(x, y);
+        if (pass === "fill") {
+          ctx.lineTo(seg[seg.length - 1][0], h);
+          ctx.lineTo(seg[0][0], h);
+          ctx.closePath();
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = color;
+          ctx.fill();
+        } else {
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  if (auto) {
+    ctx.fillStyle = cssVar("--fg-dim");
+    ctx.font = `10px ${cssVar("--font")}`;
+    ctx.fillText(formatRate(vmax), 4, 12);
+  }
+}
+
+function drawGraphs() {
+  drawGraph($("graph-cpu"), [{ key: "cpu", color: "--accent-cpu" }], false);
+  drawGraph($("graph-ram"), [{ key: "ram", color: "--accent-ram" }], false);
+  drawGraph($("graph-gpu"), [{ key: "gpu", color: "--accent-gpu" }], false);
+  drawGraph($("graph-net"), [{ key: "net_down", color: "--accent-net-down" }, { key: "net_up", color: "--accent-net-up" }], true);
+}
+
+// ---------------------------------------------------------------- 서버 통신
+
+function setOnline(value) {
+  online = value;
+  const el = $("conn");
+  el.textContent = value ? "실시간" : "연결 끊김 — 재시도 중";
+  el.classList.toggle("offline", !value);
+}
+
+async function poll() {
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    if (res.status === 503) {
+      setOnline(true);
+      $("conn").textContent = "수집 중…";
+    } else if (!res.ok) {
+      throw new Error(res.status);
+    } else {
+      const data = await res.json();
+      setOnline(true);
+      if (!latest || data.timestamp !== latest.timestamp) {
+        latest = data;
+        history.push(data);
+        const cutoff = Date.now() / 1000 - HISTORY_SEC - 5;
+        history = history.filter((s) => s.timestamp >= cutoff);
+        renderStatus(data);
+        drawGraphs();
+      }
+    }
+  } catch (e) {
+    setOnline(false);
+  } finally {
+    setTimeout(poll, Math.max(1, config.update_interval_sec) * 1000);
+  }
+}
+
+async function postConfig(changes) {
+  let res;
+  try {
+    res = await fetch("/api/config", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changes),
+    });
+  } catch (e) {
+    throw new Error("서버에 연결할 수 없습니다");
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `오류 ${res.status}`);
+  config = body.config;
+  syncTrayControls();
+  syncItemCheckboxes();
+  refreshPreviews();
+  return body;
+}
+
+async function refreshConfig() {
+  try {
+    const res = await fetch("/api/config", { cache: "no-store" });
+    if (res.ok) {
+      config = await res.json();
+      syncTrayControls();  // 트레이 우클릭 메뉴 등 다른 곳에서 바뀐 값 반영
+      syncItemCheckboxes();
+      if (!formDirty) fillForm();
+    }
+  } catch (e) { /* poll()이 연결 상태를 표시 */ }
+  setTimeout(refreshConfig, CONFIG_REFRESH_MS);
+}
+
+// ---------------------------------------------------------------- tray 체크박스
+
+function syncItemCheckboxes() {
+  for (const box of document.querySelectorAll("input[data-item]")) {
+    if (!box.matches(":focus")) box.checked = config.tray_visible_items.includes(box.dataset.item);
+  }
+}
+
+document.addEventListener("change", async (event) => {
+  const box = event.target;
+  if (!box.matches || !box.matches("input[data-item]")) return;
+  let items = [...config.tray_visible_items];
+  if (box.checked && !items.includes(box.dataset.item)) items.push(box.dataset.item);
+  if (!box.checked) items = items.filter((i) => i !== box.dataset.item);
+  try {
+    await postConfig({ tray_visible_items: items });
+  } catch (e) {
+    box.checked = !box.checked;
+    alertMessage(e.message);
+  }
+  box.blur();
+});
+
+// ---------------------------------------------------------------- 설정: 트레이 (즉시 적용)
+
+function buildStyleOptions() {
+  $("style-options").replaceChildren(...LOOK_OPTIONS.map((opt) => {
+    const el = document.createElement("label");
+    el.className = "style-option";
+    el.dataset.value = opt.value;
+    el.innerHTML = `<span class="title"><input type="radio" name="overlay-look"></span>
+      <span class="desc"></span><span class="previews"><img class="real" alt=""></span>`;
+    const radio = el.querySelector("input");
+    radio.value = opt.value;
+    el.querySelector(".title").append(opt.title);
+    el.querySelector(".desc").textContent = opt.desc;
+    radio.addEventListener("change", () => updateTray({ overlay_icon_look: opt.value }));
+    return el;
+  }));
+}
+
+function refreshPreviews() {
+  if ($("settings").hidden) return;
+  const stamp = Date.now();
+  for (const el of document.querySelectorAll(".style-option")) {
+    el.querySelector("img.real").src = `/api/overlay-preview?look=${el.dataset.value}&t=${stamp}`;
+  }
+}
+
+function syncTrayControls() {
+  for (const el of document.querySelectorAll(".style-option")) {
+    const selected = el.dataset.value === config.overlay_icon_look;
+    el.classList.toggle("selected", selected);
+    el.querySelector("input").checked = selected;
+  }
+  if (!$("overlay-size").matches(":active")) $("overlay-size").value = config.overlay_icon_size;
+  $("overlay-size-value").textContent = `${$("overlay-size").value}px`;
+  ensureOption($("overlay-font"), config.overlay_font);
+  $("overlay-font").value = config.overlay_font;
+  $("auto-start").checked = config.auto_start;
+}
+
+async function updateTray(changes) {
+  try {
+    await postConfig(changes);
+  } catch (e) {
+    alertMessage(e.message);
+    syncTrayControls();
+  }
+}
+
+$("overlay-size").addEventListener("input", (e) => { $("overlay-size-value").textContent = `${e.target.value}px`; });
+$("overlay-size").addEventListener("change", (e) => updateTray({ overlay_icon_size: Number(e.target.value) }));
+$("overlay-font").addEventListener("change", (e) => updateTray({ overlay_font: e.target.value }));
+$("auto-start").addEventListener("change", (e) => updateTray({ auto_start: e.target.checked }));
+
+// ---------------------------------------------------------------- 설정: 화면/알림 (저장 버튼)
+
+function ensureOption(select, value) {
+  if (value && ![...select.options].some((o) => o.value === value)) {
+    const option = document.createElement("option");
+    option.value = option.textContent = value;
+    select.prepend(option);
+  }
+}
+
+function fillFontSelects() {
+  for (const select of [$("font-family"), $("overlay-font")]) {
+    select.replaceChildren(...fontNames.map((name) => {
+      const option = document.createElement("option");
+      option.value = option.textContent = name;
+      return option;
+    }));
+  }
+}
+
+function buildFormFields() {
+  $("color-fields").replaceChildren(...COLOR_FIELDS.map(([key, name]) => {
+    const field = document.createElement("div");
+    field.className = "field";
+    field.innerHTML = `<span class="name"></span><input type="color" data-dirty>`;
+    field.querySelector(".name").textContent = name;
+    field.querySelector("input").id = `color-${key}`;
+    return field;
+  }));
+  $("threshold-fields").replaceChildren(...THRESHOLD_FIELDS.map(([key, name, min, max]) => {
+    const field = document.createElement("div");
+    field.className = "field";
+    field.innerHTML = `<span class="name"></span><input type="number" data-dirty>`;
+    field.querySelector(".name").textContent = name;
+    const input = field.querySelector("input");
+    Object.assign(input, { id: `th-${key}`, min, max });
+    return field;
+  }));
+}
+
+function fillForm() {
+  const t = config.ui_theme;
+  ensureOption($("font-family"), t.font_family);
+  $("font-family").value = t.font_family;
+  $("font-size-title").value = t.font_size_title;
+  $("font-size-value").value = t.font_size_value;
+  $("font-size-small").value = t.font_size_small;
+  $("section-gap").value = t.section_gap;
+  $("interval").value = config.update_interval_sec;
+  $("interval-value").textContent = `${config.update_interval_sec}초`;
+  for (const [key] of COLOR_FIELDS) $(`color-${key}`).value = t[key].toLowerCase();
+  $("alerts-enabled").checked = config.alerts_enabled;
+  for (const [key] of THRESHOLD_FIELDS) $(`th-${key}`).value = config.alert_thresholds[key];
+  formDirty = false;
+}
+
+function formChanges() {
+  const theme = {
+    font_family: $("font-family").value,
+    font_size_title: Number($("font-size-title").value),
+    font_size_value: Number($("font-size-value").value),
+    font_size_small: Number($("font-size-small").value),
+    section_gap: Number($("section-gap").value),
+  };
+  for (const [key] of COLOR_FIELDS) theme[key] = $(`color-${key}`).value.toUpperCase();
+  const thresholds = {};
+  for (const [key] of THRESHOLD_FIELDS) thresholds[key] = Number($(`th-${key}`).value);
+  return {
+    ui_theme: theme,
+    update_interval_sec: Number($("interval").value),
+    alerts_enabled: $("alerts-enabled").checked,
+    alert_thresholds: thresholds,
+  };
+}
+
+document.addEventListener("input", (event) => {
+  if (!event.target.matches || !event.target.matches("[data-dirty]")) return;
+  formDirty = true;
+  $("interval-value").textContent = `${$("interval").value}초`;
+  applyTheme({ ...config.ui_theme, ...formChanges().ui_theme });  // 저장 전 미리보기
+  setMessage("", "");
+});
+
+$("save").addEventListener("click", async () => {
+  try {
+    const result = await postConfig(formChanges());
+    formDirty = false;
+    applyTheme(config.ui_theme);
+    setMessage(result.changed ? "저장했습니다" : "변경 사항이 없습니다", "ok");
+  } catch (e) {
+    setMessage(e.message, "error");
+  }
+});
+
+$("alert-test").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/alerts/test", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || `오류 ${res.status}`);
+    setMessage("테스트 알림을 보냈습니다. 화면 오른쪽 아래를 확인하세요", "ok");
+  } catch (e) {
+    setMessage(`테스트 알림 실패: ${e.message}`, "error");
+  }
+});
+
+$("revert").addEventListener("click", () => {
+  fillForm();
+  applyTheme(config.ui_theme);
+  setMessage("", "");
+});
+
+function setMessage(text, kind) {
+  const el = $("save-message");
+  el.textContent = text;
+  el.className = `message ${kind}`;
+}
+
+function alertMessage(text) {
+  $("conn").textContent = `설정 변경 실패: ${text}`;
+  $("conn").classList.add("offline");
+  setTimeout(() => setOnline(online), 4000);
+}
+
+$("settings-toggle").addEventListener("click", () => {
+  const panel = $("settings");
+  panel.hidden = !panel.hidden;
+  if (!panel.hidden) {
+    if (!formDirty) fillForm();
+    syncTrayControls();
+    refreshPreviews();
+    clearInterval(previewTimer);
+    previewTimer = setInterval(refreshPreviews, PREVIEW_REFRESH_MS);
+  } else {
+    clearInterval(previewTimer);
+  }
+});
+
+window.addEventListener("resize", drawGraphs);
+
+// ---------------------------------------------------------------- 시작
+
+async function start() {
+  applyTheme(config.ui_theme);
+  buildStyleOptions();
+  buildFormFields();
+  try {
+    fontNames = await (await fetch("/api/fonts")).json();
+  } catch (e) {
+    fontNames = [];
+  }
+  fillFontSelects();
+  fillForm();
+  syncTrayControls();
+  try {
+    history = await (await fetch("/api/history", { cache: "no-store" })).json();
+    latest = history.length ? history[history.length - 1] : null;
+    if (latest) renderStatus(latest);
+    drawGraphs();
+  } catch (e) {
+    setOnline(false);
+  }
+  syncItemCheckboxes();
+  poll();
+  setTimeout(refreshConfig, CONFIG_REFRESH_MS);
+}
+
+start();
+</script>
+</body>
+</html>
