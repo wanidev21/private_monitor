@@ -2,7 +2,7 @@
 
 > **이 문서만 읽고 현재 구현을 처음부터 다시 만들 수 있도록** 최종 사양, 핵심 알고리즘, 수치, 사용자 결정, 폐기한 방식(과 이유)을 모두 정리한다.
 > 코드와 문서가 다르면 **코드가 기준**이며, 문서를 즉시 고친다.
-> 상태: 10단계 전부 구현·검증 완료 (테스트 134개 통과, exe 빌드·실행 확인). 남은 사용자 확인: PC 재부팅 후 자동 실행, exe에서 알림/클릭 동작.
+> 상태: 10단계 전부 구현·검증 완료 (테스트 136개 통과, exe 빌드·실행 확인). 남은 사용자 확인: PC 재부팅 후 자동 실행, exe에서 알림/클릭 동작.
 
 ---
 
@@ -256,7 +256,9 @@ main():
 - `_section(name, fn)`: 예외 시 None, 같은 항목 오류 로그는 복구될 때까지 1회, 복구 시 info 로그.
 - 경과 시간 `elapsed` = monotonic 차이(첫 샘플 None).
 
-**GPU**: `nvmlInit()` → `nvmlDeviceGetHandleByIndex(0)`(실패 None). 정보: `GetUtilizationRates().gpu`, `GetTemperature(NVML_TEMPERATURE_GPU)`, `GetMemoryInfo` used/total GB, `GetName`(bytes면 decode). 예외 시 None.
+**GPU**: `init_gpu(log_failure=True)` = `nvmlInit()` → `nvmlDeviceGetHandleByIndex(0)`(실패 None). `read_gpu_info(handle)`: `GetUtilizationRates().gpu`, `GetTemperature(NVML_TEMPERATURE_GPU)`, `GetMemoryInfo` used/total GB, `GetName`(bytes면 decode). 실패 시 예외.
+- **재연결 `_collect_gpu()`** (`GPU_RETRY_SEC=30`): 읽기 실패 → 경고 1회 + `nvmlShutdown()` + 핸들 None. 핸들이 None이면(시작 시 실패 포함) 30초마다 `init_gpu(log_failure=False)` 재시도, 복구되면 info `GPU recovered`.
+- 이유: 앱 실행 중 드라이버 업데이트(595.79 → 617.42)로 옛 핸들이 무효가 되어 재시작 전까지 GPU가 계속 None이었다(실패 로그도 debug라 안 남았음).
 
 **디스크**
 - 60초마다 `disk_partitions(all=False)` 재조회. `fstype` 빈 문자열이거나 `opts`에 `cdrom`이면 제외. 각 드라이브에 `winapi.get_physical_drive_name(letter)` 매핑 캐시.
@@ -651,7 +653,7 @@ exit /b 1
 
 ## 8. 테스트
 
-실행: `.venv\Scripts\python.exe -m unittest discover -s tests -t .` (`-t .` 필요 — `tests.test_display`의 `sample_data()`를 다른 테스트가 import). 현재 134개.
+실행: `.venv\Scripts\python.exe -m unittest discover -s tests -t .` (`-t .` 필요 — `tests.test_display`의 `sample_data()`를 다른 테스트가 import). 현재 136개.
 
 **원칙**
 - 실제 사용자 설정/레지스트리를 건드리지 않는다: 설정은 `PC_MONITOR_HOME` 임시 폴더, 레지스트리는 `HKCU\Software\PCMonitorTest-<uuid>\...` 임시 키(끝나면 재귀 삭제), 웹서버는 `sync_auto_start`/notifier를 가짜로 주입.
@@ -661,7 +663,7 @@ exit /b 1
 | 파일 | 확인 내용 |
 |---|---|
 | test_config | 기본 파일 생성, 누락 키 채움, `tray_icon_style` 제거, 깨진 파일 `.bak`, 로드 시 잘못된 값 기본값, `network` 분리·디스크 대문자·중복 제거, 부분 중첩 update+version, 같은 값 version 유지, 잘못된 update는 키 경로 메시지+무변경, bool≠int, 반환값 복사본, 색 대문자, 오버레이 설정 범위와 6종 |
-| test_collector | 첫 샘플 속도 0·cdrom 제외·매핑 실패 None, 경과 시간 기반 속도, 자정 누적 초기화, 카운터 감소 0, 항목 실패 격리(로그), 분리된 디스크 건너뜀, 60초 히스토리, mock 형태 |
+| test_collector | GPU 핸들 무효 시 30초 뒤 재초기화·시작 시 실패 재시도, 첫 샘플 속도 0·cdrom 제외·매핑 실패 None, 경과 시간 기반 속도, 자정 누적 초기화, 카운터 감소 0, 항목 실패 격리(로그), 분리된 디스크 건너뜀, 60초 히스토리, mock 형태 |
 | test_display | 부하색 경계(50/50.4/80/80.1/None), format_rate, 원형 툴팁 예시·네트워크 묶음·빈/대기·GPU 없음·127자 축약/자름 |
 | test_display_icons | 네트워크 단위(자연·즉시 상향·히스테리시스), 2글자 값, icon_face(비율·99 상한·없음·네트워크·히스테리시스 이월), 툴팁 문구, `format_amount_mb` |
 | test_iconrender | label/badge 크기·내용, 없는 글꼴 대체, **`°` 간격이 글꼴별로(맑은 고딕, Segoe UI, DX영화자막) 최소 간격 근처로 줄고 겹치지 않음**(실제 렌더 픽셀로 측정), 6종×크기 strip 높이·hitbox 순서/범위, 낮은 작업표시줄(40px)에 맞춤, 데이터 없음, **값이 바뀌어도 폭 불변**, 네트워크 단위 이월, 미리보기, text 디자인 parts, LOOK_LABELS와 OVERLAY_LOOKS 일치 |
@@ -730,7 +732,7 @@ exit /b 1
 
 ## 11. 개발 환경 참고 (이 PC)
 
-- RTX 2060 (드라이버 595.79), 드라이브 8개 C D E F G I J K(각각 다른 물리 디스크), RAM 31.8GB.
+- RTX 2060 (드라이버 617.42, 2026-10-12 업데이트), 드라이브 8개 C D E F G I J K(각각 다른 물리 디스크), RAM 31.8GB.
 - 듀얼 모니터: 주 1920×1080(작업표시줄 y=1032~1080) + 보조 세로 1440×2560(원점 1920,-726, 작업표시줄 y=1786~1834). 둘 다 100% 배율, 라이트 작업표시줄.
 - 사용자 오버레이 글꼴 설정 이력: DX영화자막 M(사용자 설치 글꼴). 디자인은 게이지형으로 바꿔 쓴 적 있음.
 - 실행: 개발 `.venv\Scripts\python.exe main.py [--mock]`, exe `dist\PCMonitor\PCMonitor.exe`. 동시에 두 개는 뮤텍스로 막힘.

@@ -80,6 +80,46 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(data["disks"][0]["read_mb_s"], 0.0)
         self.assertIsNone(data["disks"][1]["read_mb_s"])  # 매핑 실패 드라이브
 
+    def test_gpu_reinitializes_after_driver_update(self):
+        info = {"name": "GPU", "percent": 10, "temp": 40, "vram_used_gb": 1.0, "vram_total_gb": 6.0}
+        reads = {"fail": False}
+
+        def read(handle):
+            if reads["fail"] or handle != "h":
+                raise RuntimeError("NVML_ERROR_UNINITIALIZED")
+            return info
+
+        with mock.patch.object(collector_mod, "read_gpu_info", side_effect=read), \
+                mock.patch.object(collector_mod, "shutdown_gpu") as shutdown, \
+                mock.patch.object(collector_mod, "init_gpu", return_value="h") as init:
+            self.collector._gpu_handle = "h"
+            self.assertEqual(self.collector.collect_once()["gpu"], info)
+
+            reads["fail"] = True  # 드라이버 교체로 핸들 무효
+            with self.assertLogs(collector_mod.log, "WARNING"):
+                self.assertIsNone(self.collector.collect_once()["gpu"])
+            shutdown.assert_called_once()
+            reads["fail"] = False
+
+            self.now += Collector.GPU_RETRY_SEC - 1  # 재시도 간격 전에는 초기화하지 않음
+            self.assertIsNone(self.collector.collect_once()["gpu"])
+            init.assert_not_called()
+
+            self.now += 1
+            self.assertEqual(self.collector.collect_once()["gpu"], info)
+            init.assert_called_once_with(log_failure=False)
+
+    def test_gpu_retries_when_unavailable_at_start(self):
+        info = {"name": "GPU", "percent": 1, "temp": 30, "vram_used_gb": 0.5, "vram_total_gb": 6.0}
+        with mock.patch.object(collector_mod, "read_gpu_info", return_value=info), \
+                mock.patch.object(collector_mod, "init_gpu", side_effect=[None, "h"]) as init:
+            self.assertIsNone(self.collector.collect_once()["gpu"])
+            self.now += Collector.GPU_RETRY_SEC
+            self.assertIsNone(self.collector.collect_once()["gpu"])  # 아직 실패
+            self.now += Collector.GPU_RETRY_SEC
+            self.assertEqual(self.collector.collect_once()["gpu"], info)
+            self.assertEqual(init.call_count, 2)
+
     def test_rates_use_elapsed_time(self):
         self.collector.collect_once()
         self.now += 2

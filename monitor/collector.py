@@ -34,7 +34,7 @@ GB = 1024 ** 3
 # GPU
 # ---------------------------------------------------------------------------
 
-def init_gpu():
+def init_gpu(log_failure: bool = True):
     """NVML 초기화 후 첫 번째 GPU 핸들. 드라이버가 없거나 실패하면 None."""
     if pynvml is None:
         return None
@@ -42,28 +42,33 @@ def init_gpu():
         pynvml.nvmlInit()
         return pynvml.nvmlDeviceGetHandleByIndex(0)
     except Exception:
-        log.info("GPU unavailable", exc_info=True)
+        if log_failure:
+            log.info("GPU unavailable", exc_info=True)
         return None
 
 
-def get_gpu_info(handle) -> dict | None:
-    if handle is None:
-        return None
+def shutdown_gpu() -> None:
+    if pynvml is None:
+        return
     try:
-        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        name = pynvml.nvmlDeviceGetName(handle)
-        return {
-            "name": name if isinstance(name, str) else name.decode(),
-            "percent": util.gpu,
-            "temp": temp,
-            "vram_used_gb": round(mem.used / GB, 1),
-            "vram_total_gb": round(mem.total / GB, 1),
-        }
+        pynvml.nvmlShutdown()
     except Exception:
-        log.debug("GPU read failed", exc_info=True)
-        return None
+        log.debug("nvmlShutdown failed", exc_info=True)
+
+
+def read_gpu_info(handle) -> dict:
+    """GPU 정보. 실패하면 예외 (드라이버 업데이트 등으로 핸들이 무효가 된 경우)."""
+    util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+    temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+    mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+    name = pynvml.nvmlDeviceGetName(handle)
+    return {
+        "name": name if isinstance(name, str) else name.decode(),
+        "percent": util.gpu,
+        "temp": temp,
+        "vram_used_gb": round(mem.used / GB, 1),
+        "vram_total_gb": round(mem.total / GB, 1),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +117,7 @@ class Collector:
     DRIVE_REFRESH_SEC = 60
     HISTORY_WINDOW_SEC = 60
     DEFAULT_INTERVAL_SEC = 2
+    GPU_RETRY_SEC = 30
 
     def __init__(self, config, mock: bool = False):
         self._config = config
@@ -128,6 +134,8 @@ class Collector:
         self.today = datetime.date.today
 
         self._gpu_handle = None
+        self._gpu_retry_at = None  # 핸들이 없을 때 다시 초기화를 시도할 monotonic 시각
+        self._gpu_lost = False     # 동작하던 GPU가 실패해 재연결을 기다리는 중
         self._drives = []  # [(mount, physical_drive_name | None)]
         self._drives_checked_at = None
         self._prev_sample_at = None
@@ -180,11 +188,8 @@ class Collector:
 
     def shutdown(self) -> None:
         self.stop()
-        if self._gpu_handle is not None and pynvml is not None:
-            try:
-                pynvml.nvmlShutdown()
-            except Exception:
-                log.debug("nvmlShutdown failed", exc_info=True)
+        if self._gpu_handle is not None:
+            shutdown_gpu()
             self._gpu_handle = None
 
     # --- 수집 ---------------------------------------------------------------
@@ -199,7 +204,7 @@ class Collector:
         return {
             "cpu": self._section("cpu", self._collect_cpu),
             "ram": self._section("ram", self._collect_ram),
-            "gpu": self._section("gpu", lambda: get_gpu_info(self._gpu_handle)),
+            "gpu": self._section("gpu", self._collect_gpu),
             "disks": self._section("disks", lambda: self._collect_disks(elapsed)) or [],
             "network": self._section("network", lambda: self._collect_network(elapsed)),
             "timestamp": self.wall_clock(),
@@ -218,6 +223,34 @@ class Collector:
             self._failing_sections.discard(name)
             log.info("collect %s recovered", name)
         return value
+
+    def _collect_gpu(self) -> dict | None:
+        """GPU 정보. 드라이버 업데이트·재설치로 핸들이 무효가 되면 NVML을 닫고
+        GPU_RETRY_SEC마다 다시 초기화한다 (처음에 실패한 경우도 같은 방식으로 재시도)."""
+        if self._gpu_handle is None:
+            if self._gpu_retry_at is None:
+                self._gpu_retry_at = self.clock() + self.GPU_RETRY_SEC
+            if self.clock() < self._gpu_retry_at:
+                return None
+            self._gpu_handle = init_gpu(log_failure=False)
+            if self._gpu_handle is None:
+                self._gpu_retry_at = self.clock() + self.GPU_RETRY_SEC
+                return None
+        try:
+            info = read_gpu_info(self._gpu_handle)
+        except Exception:
+            if not self._gpu_lost:
+                log.warning("GPU read failed; reinitializing NVML every %ds", self.GPU_RETRY_SEC,
+                            exc_info=True)
+            self._gpu_lost = True
+            shutdown_gpu()
+            self._gpu_handle = None
+            self._gpu_retry_at = self.clock() + self.GPU_RETRY_SEC
+            return None
+        if self._gpu_lost:
+            self._gpu_lost = False
+            log.info("GPU recovered")
+        return info
 
     @staticmethod
     def _collect_cpu() -> dict:
