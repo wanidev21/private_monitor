@@ -24,13 +24,13 @@ Windows 11 작업표시줄에 CPU · RAM · GPU · 디스크 · 네트워크 수
 
 Python 설치 시:
 - "Add python.exe to PATH"는 선택 사항이다 (아래에서 전체 경로로 실행).
-- `build.bat`은 기본으로 `C:\Python314\python.exe`를 찾는다. **Customize installation → Install location**을 `C:\Python314`로 지정하면 그대로 쓸 수 있다. 다른 위치에 설치했다면 아래 2-B처럼 가상환경을 먼저 만들면 된다.
+- `build.bat`은 기본으로 `C:\Python314\python.exe`를 찾는다. **Customize installation → Install location**을 `C:\Python314`로 지정하면 그대로 쓸 수 있다. 다른 위치에 설치했다면 아래 3-B처럼 가상환경을 먼저 만들면 된다.
 
 ### 2. 소스 받기
 
 ```bat
-git clone https://github.com/wanidev21/private_monitor.git C:\waniwani\monitor
-cd /d C:\waniwani\monitor
+git clone https://github.com/wanidev21/private_monitor.git
+cd /d private_monitor
 ```
 (폴더 위치는 자유. 이후 명령은 그 폴더에서 실행)
 
@@ -50,7 +50,7 @@ build.bat
 
 PowerShell에서 실행할 때:
 ```powershell
-& cmd.exe /c C:\waniwani\monitor\build.bat /nopause
+& cmd.exe /c .\build.bat /nopause
 ```
 
 ### 3-B. Python이 `C:\Python314`가 아닌 곳에 있을 때

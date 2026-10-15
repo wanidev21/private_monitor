@@ -56,8 +56,8 @@ def _truetype(font_file: str | None, px: int):
     return ImageFont.load_default(size=px)
 
 
-# 글꼴에 따라(DX영화자막 같은 한글 글꼴) 'G°C'가 'G° C'처럼 벌어져 보인다 (사용자 지적).
-# 원인은 글꼴마다 다르다: '°' 글자 폭이 넓거나, 뒤 글자('C')의 왼쪽 여백이 넓다 (DX영화자막은 후자).
+# 글꼴에 따라(일부 한글 글꼴) 'G°C'가 'G° C'처럼 벌어져 보인다 (사용자 지적).
+# 원인은 글꼴마다 다르다: '°' 글자 폭이 넓거나, 뒤 글자('C')의 왼쪽 여백이 넓다.
 # 그래서 '°' 잉크 오른쪽 끝과 뒤 글자 잉크 왼쪽 끝 사이의 실제 간격을 재서, 최소 간격만 남기고 당긴다.
 # 고정 비율로 당기면 Segoe UI처럼 원래 붙어 있는 글꼴에서 겹친다 (비교 렌더링으로 확인).
 DEGREE_MIN_GAP_RATIO = 0.08
@@ -67,7 +67,7 @@ _degree_kern_cache: dict[tuple, float] = {}
 def _ink_range(font, text: str) -> tuple[int, int] | None:
     """text를 원점에 그렸을 때 실제 잉크가 있는 x 구간 (left, right). 잉크가 없으면 None.
 
-    getbbox()는 글꼴에 따라 잉크가 아니라 글자 칸 전체를 돌려준다 (DX영화자막의 '°'는 잉크 3px인데 bbox 9px).
+    getbbox()는 글꼴에 따라 잉크가 아니라 글자 칸 전체를 돌려준다 (어떤 글꼴은 '°' 잉크가 3px인데 bbox 9px).
     그래서 빈 이미지에 실제로 그려 픽셀로 잰다.
     """
     size = max(8, int(getattr(font, "size", 10)))

@@ -43,10 +43,13 @@ class OverlayIconTest(unittest.TestCase):
         return min(x for x in columns if x >= degree_right) - degree_right
 
     def test_degree_sign_is_tightened_per_font(self):
+        import os
         from monitor import fonts
 
         font_files = ["malgunbd.ttf", "malgun.ttf", iconrender.DEFAULT_OVERLAY_FONT_FILE]
-        user_font = fonts.resolve_font_file("DX영화자막 M")  # 사용자가 쓰는 글꼴 (이 PC에 있을 때만)
+        # '°' 뒤가 벌어져 보이는 글꼴 이름 (설치돼 있을 때만, 예: 일부 한글 글꼴)
+        wide_name = os.environ.get("PC_MONITOR_TEST_WIDE_FONT")
+        user_font = fonts.resolve_font_file(wide_name) if wide_name else None
         if user_font:
             font_files.append(user_font)
         for font_file in font_files:

@@ -37,7 +37,7 @@ Windows 11 작업표시줄에 CPU · RAM · GPU · 디스크 · 네트워크 수
 - **Windows 11 전용** (`sys.platform != "win32"`면 안내 후 종료).
 - **Python: python.org 설치판 3.14** (`C:\Python314\python.exe`, 3.11+ 호환 문법). 가상환경 `.venv` 필수.
   - **Microsoft Store판 Python 금지** (`py -3.13`이 Store판을 가리켰음): 샌드박스라 HKCU Run 쓰기가 가상화되고 PyInstaller 문제.
-  - 이 PC의 PATH `python`은 3.10(패키지 없음)이므로 항상 `.venv\Scripts\python.exe`를 쓴다.
+  - PATH의 `python`이 다른 버전일 수 있으므로 항상 `.venv\Scripts\python.exe`를 쓴다.
 - 기본 venv의 `python.exe`는 기본 인터프리터(`C:\Python314\python.exe`)를 **자식 프로세스로** 띄운다 → 실행 파일 경로가 필요하면 `QueryFullProcessImageNameW` 사용.
 
 **requirements.txt**
@@ -72,7 +72,7 @@ pyinstaller>=6.10.0
 ## 3. 프로젝트 구조
 
 ```
-C:\waniwani\monitor\
+<프로젝트 폴더>\
 ├── CLAUDE.md
 ├── README.md               # 사용자용: 실행/빌드/파일 위치/문제 해결
 ├── main.py                 # 엔트리포인트
@@ -258,7 +258,7 @@ main():
 
 **GPU**: `init_gpu(log_failure=True)` = `nvmlInit()` → `nvmlDeviceGetHandleByIndex(0)`(실패 None). `read_gpu_info(handle)`: `GetUtilizationRates().gpu`, `GetTemperature(NVML_TEMPERATURE_GPU)`, `GetMemoryInfo` used/total GB, `GetName`(bytes면 decode). 실패 시 예외.
 - **재연결 `_collect_gpu()`** (`GPU_RETRY_SEC=30`): 읽기 실패 → 경고 1회 + `nvmlShutdown()` + 핸들 None. 핸들이 None이면(시작 시 실패 포함) 30초마다 `init_gpu(log_failure=False)` 재시도, 복구되면 info `GPU recovered`.
-- 이유: 앱 실행 중 드라이버 업데이트(595.79 → 617.42)로 옛 핸들이 무효가 되어 재시작 전까지 GPU가 계속 None이었다(실패 로그도 debug라 안 남았음).
+- 이유: 앱 실행 중 GPU 드라이버 업데이트로 옛 핸들이 무효가 되어 재시작 전까지 GPU가 계속 None이었다(실패 로그도 debug라 안 남았음).
 
 **디스크**
 - 60초마다 `disk_partitions(all=False)` 재조회. `fstype` 빈 문자열이거나 `opts`에 `cdrom`이면 제외. 각 드라이브에 `winapi.get_physical_drive_name(letter)` 매핑 캐시.
@@ -321,7 +321,7 @@ main():
 
 ### 6.6 fonts.py
 - `installed_fonts()`(lru_cache): `HKLM`과 `HKCU`의 `SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` 값을 읽어 `{소문자 이름: 전체 경로}`. 값 이름에서 `" (TrueType)"`/`" (OpenType)"` 제거, `&`로 나눠 각각 등록, 상대 경로면 `%WINDIR%\Fonts`. 먼저 등록된 것이 우선.
-- `resolve_font_file(name)`: 공백 제거·소문자로 찾고 파일이 있으면 경로, 아니면 None. (예: `Segoe UI Semibold` → `seguisb.ttf`, 사용자 글꼴 `DX영화자막 M` → `%LOCALAPPDATA%\Microsoft\Windows\Fonts\DX영화자막.ttf`)
+- `resolve_font_file(name)`: 공백 제거·소문자로 찾고 파일이 있으면 경로, 아니면 None. (예: `Segoe UI Semibold` → `seguisb.ttf`, 사용자 설치 글꼴 → `%LOCALAPPDATA%\Microsoft\Windows\Fonts\<파일>`)
 
 ### 6.7 iconrender.py — 오버레이 디자인 렌더링
 
@@ -336,10 +336,10 @@ main():
 
 **`°` 뒤 글자 당기기 (사용자 지적: `G° C`처럼 벌어짐)**
 - `DEGREE_MIN_GAP_RATIO = 0.08`.
-- `_ink_range(font, text)`: 빈 L 이미지(폭 `getlength+size*3`, 높이 `size*3`)의 `(size, size//2)`에 그린 뒤 `getbbox()`로 **실제 잉크 x 구간**. (`font.getbbox()`는 글꼴에 따라 잉크가 아니라 글자 칸 전체를 돌려줌 — DX영화자막 `°`는 잉크 3~5px인데 bbox 9px)
+- `_ink_range(font, text)`: 빈 L 이미지(폭 `getlength+size*3`, 높이 `size*3`)의 `(size, size//2)`에 그린 뒤 `getbbox()`로 **실제 잉크 x 구간**. (`font.getbbox()`는 글꼴에 따라 잉크가 아니라 글자 칸 전체를 돌려줌 — 어떤 한글 글꼴은 `°` 잉크가 3~5px인데 bbox 9px)
 - `_degree_kern_px(font, next_char)`(캐시 키: 글꼴 경로·크기·뒤 글자): `gap = getlength("°") + ink(next).left - ink("°").right`, `kern = max(0, gap - 0.08*size)`.
 - `_text_length(text, font) = getlength(text) - Σ kern(°, 뒤 글자)`, `_draw_text(draw, xy, text, font, fill, anchor)`: `°`로 나눠 조각마다 같은 anchor로 그리고, 뒤 조각이 있으면 x를 kern만큼 당김. 가운데 정렬·폭 맞춤·두 줄 텍스트 모두 이 두 함수를 쓴다.
-- 결과: Segoe UI Semibold는 0(변화 없음), DX영화자막은 실제로 붙음.
+- 결과: Segoe UI Semibold는 0(변화 없음), `°` 뒤가 벌어지던 한글 글꼴은 실제로 붙음.
 
 **디자인별 항목 이미지 (크기 s = size/32)**
 
@@ -643,7 +643,7 @@ if /i not "%~1"=="/nopause" pause
 exit /b 1
 ```
 - `if ( … )` 블록 안 `echo`에 괄호를 쓰지 않는다(`)`가 블록을 닫음).
-- PowerShell에서 실행: `& cmd.exe /c C:\waniwani\monitor\build.bat /nopause` (`cmd /c "build.bat /nopause"`처럼 묶으면 명령 이름으로 인식 못 함).
+- PowerShell에서 실행: `& cmd.exe /c .\build.bat /nopause` (`cmd /c "build.bat /nopause"`처럼 묶으면 명령 이름으로 인식 못 함).
 - **onedir만** 사용(`--onefile` 금지: 시작 느림, 템플릿 경로·백신 오탐). 결과 `dist\PCMonitor\` 폴더째 배포(약 50MB). 실행 메모리 약 100~150MB.
 - 실행 중인 exe가 있으면 `--clean`이 `dist\PCMonitor` 삭제에 실패 → 먼저 종료.
 - `nvml.dll`은 드라이버에 포함되므로 `--collect-binaries` 불필요. 빌드 경고 파일 `build\PCMonitor\warn-PCMonitor.txt`에서 핵심 모듈 누락 확인.
@@ -666,7 +666,7 @@ exit /b 1
 | test_collector | GPU 핸들 무효 시 30초 뒤 재초기화·시작 시 실패 재시도, 첫 샘플 속도 0·cdrom 제외·매핑 실패 None, 경과 시간 기반 속도, 자정 누적 초기화, 카운터 감소 0, 항목 실패 격리(로그), 분리된 디스크 건너뜀, 60초 히스토리, mock 형태 |
 | test_display | 부하색 경계(50/50.4/80/80.1/None), format_rate, 원형 툴팁 예시·네트워크 묶음·빈/대기·GPU 없음·127자 축약/자름 |
 | test_display_icons | 네트워크 단위(자연·즉시 상향·히스테리시스), 2글자 값, icon_face(비율·99 상한·없음·네트워크·히스테리시스 이월), 툴팁 문구, `format_amount_mb` |
-| test_iconrender | label/badge 크기·내용, 없는 글꼴 대체, **`°` 간격이 글꼴별로(맑은 고딕, Segoe UI, DX영화자막) 최소 간격 근처로 줄고 겹치지 않음**(실제 렌더 픽셀로 측정), 6종×크기 strip 높이·hitbox 순서/범위, 낮은 작업표시줄(40px)에 맞춤, 데이터 없음, **값이 바뀌어도 폭 불변**, 네트워크 단위 이월, 미리보기, text 디자인 parts, LOOK_LABELS와 OVERLAY_LOOKS 일치 |
+| test_iconrender | label/badge 크기·내용, 없는 글꼴 대체, **`°` 간격이 글꼴별로(맑은 고딕, Segoe UI, 환경변수 `PC_MONITOR_TEST_WIDE_FONT`로 지정한 글꼴) 최소 간격 근처로 줄고 겹치지 않음**(실제 렌더 픽셀로 측정), 6종×크기 strip 높이·hitbox 순서/범위, 낮은 작업표시줄(40px)에 맞춤, 데이터 없음, **값이 바뀌어도 폭 불변**, 네트워크 단위 이월, 미리보기, text 디자인 parts, LOOK_LABELS와 OVERLAY_LOOKS 일치 |
 | test_graph | blend, 시리즈(cpu, net, gpu_temp, disk), auto_scale, 좌표 매핑, 오래된 샘플 제외·None 끊김, 값 상한, core_grid |
 | test_popup | 팝업 위치(오른쪽 아래, 왼쪽 위, 음수 좌표 보조 모니터), 섹션 순서·묶음, 분리 디스크, popup_texts, 제목/보조 줄, 커서 모니터 API |
 | test_overlay | compute_placement(정렬, 겹침, 딱 맞음, 앱 버튼 없음, 폭 0), **find_clock_left(글자 틈, 알림 종 포함, 넓은 틈에서 중단, 자기 오버레이 ignore, 내용 없음, 탐색 폭 밖)**, find_taskbars(주 notify 있음·보조 None), **find_covered_taskbars(전체화면이 위면 그 모니터만, 작업표시줄이 위면 아님, 최대화·부적격 창, 두 모니터 걸친 창)**, covered_taskbars 타입 |
@@ -702,7 +702,7 @@ exit /b 1
 | 오버레이 클릭 | 클릭 통과 + 트레이로 조작 안(B) | 오버레이 직접 클릭(A) |
 | 보조 모니터 | 트레이 영역 없음, 시계는 창 핸들 없음 | 픽셀로 시계 탐지. 틈 허용치 6px은 알림 종만 잡아 시계를 덮음 → 20px + 자기 창 ignore |
 | 전체화면 판정 | ① `SHQueryUserNotificationState` 전역 → ② 전경 창 + QUNS: 한 모니터 전체화면 + 다른 모니터 창을 쓰면 **모든 모니터 오버레이가 숨음**(exe 검증 중 발견) | **Z-order에서 작업표시줄보다 위이면서 모니터를 덮는 창**, 모니터별, 200ms 빠른 확인 |
-| `°` 간격 | ① 고정 16% 당김: Segoe UI는 겹침, DX영화자막은 부족 → ② `getbbox` 메트릭: DX영화자막 bbox가 칸 전체라 0 → ③ `°`만 측정: 원인이 뒤 글자 왼쪽 여백이라 0 | **실제 렌더 픽셀로 `°` 잉크 끝~뒤 글자 잉크 시작 측정**, 최소 8% 남김 |
+| `°` 간격 | ① 고정 16% 당김: Segoe UI는 겹침, 일부 한글 글꼴은 부족 → ② `getbbox` 메트릭: 그 글꼴은 bbox가 칸 전체라 0 → ③ `°`만 측정: 원인이 뒤 글자 왼쪽 여백이라 0 | **실제 렌더 픽셀로 `°` 잉크 끝~뒤 글자 잉크 시작 측정**, 최소 8% 남김 |
 | Python | Store판 3.13(샌드박스) | python.org 3.14 |
 | pystray 아이콘 식별 | uID 버그로 모두 0, 매 실행 다른 아이콘으로 인식·숨김 영역 | 고정 GUID + `NIM_DELETE` 선행 + 자동 표시(`IsPromoted` 없을 때만) |
 | 대시보드 주소 | `localhost`는 IPv6 먼저 시도해 느림 | `127.0.0.1` |
@@ -720,7 +720,7 @@ exit /b 1
 - **스레딩**: tkinter는 메인 스레드만. pystray/웹/수집/알림/로그는 daemon 스레드. 콜백에서 UI가 필요하면 `root.after`.
 - **ctypes**: HWND·HANDLE 인자/반환은 `argtypes`/`restype` 지정(64비트 핸들 오버플로). `GetLastError`는 `WinDLL(..., use_last_error=True)` + `ctypes.get_last_error()`.
 - **DPI**: `SetProcessDpiAwareness(2)`를 tk 생성 전에. 모든 좌표는 물리 픽셀, 크기·간격은 작업표시줄/모니터 DPI 배율 곱.
-- **음수 좌표**: 이 PC 보조 모니터는 `(1920, -726, 3360, 1834)`. 위치 계산·캡처에서 음수를 가정.
+- **음수 좌표**: 보조 모니터가 주 모니터보다 위/왼쪽으로 걸치면 좌표가 음수다. 위치 계산·캡처에서 음수를 가정.
 - **콘솔 없는 exe**: stdout/stderr None 대체, uvicorn `log_config=None`, subprocess가 필요하면 `CREATE_NO_WINDOW`.
 - **에러 격리**: 수집 항목, 오버레이 갱신, 알림 발송, CSV 쓰기, 레지스트리 작업은 모두 예외를 로그로 삼키고 앱은 계속.
 - **포트 충돌**: 18099 사용 중이면 대시보드만 비활성(메뉴/버튼 disabled), 나머지는 정상.
@@ -730,13 +730,10 @@ exit /b 1
 
 ---
 
-## 11. 개발 환경 참고 (이 PC)
+## 11. 실행
 
-- RTX 2060 (드라이버 617.42, 2026-10-12 업데이트), 드라이브 8개 C D E F G I J K(각각 다른 물리 디스크), RAM 31.8GB.
-- 듀얼 모니터: 주 1920×1080(작업표시줄 y=1032~1080) + 보조 세로 1440×2560(원점 1920,-726, 작업표시줄 y=1786~1834). 둘 다 100% 배율, 라이트 작업표시줄.
-- 사용자 오버레이 글꼴 설정 이력: DX영화자막 M(사용자 설치 글꼴). 디자인은 게이지형으로 바꿔 쓴 적 있음.
 - 실행: 개발 `.venv\Scripts\python.exe main.py [--mock]`, exe `dist\PCMonitor\PCMonitor.exe`. 동시에 두 개는 뮤텍스로 막힘.
-- 현재 자동 실행 등록: `"C:\waniwani\monitor\dist\PCMonitor\PCMonitor.exe"`.
+- exe로 실행하면 자동 실행 등록이 `"<프로젝트 폴더>\dist\PCMonitor\PCMonitor.exe"`로 바뀐다.
 
 ---
 
@@ -780,7 +777,7 @@ exit /b 1
 - [ ] 바깥 클릭·Esc로 닫힘, 안쪽 클릭은 유지, 열린 상태에서 오버레이 클릭 시 다시 열리지 않음
 
 **대시보드**
-- [ ] 팝업 버튼/우클릭으로 `127.0.0.1:18099`가 열리고 CPU·RAM·GPU·네트워크·드라이브 8개 표시
+- [ ] 팝업 버튼/우클릭으로 `127.0.0.1:18099`가 열리고 CPU·RAM·GPU·네트워크·모든 드라이브 표시
 - [ ] tray 체크박스로 오버레이 항목 추가/제거
 - [ ] Settings 미리보기 6종이 현재 수치로 보이고 선택 즉시 반영, 크기/글꼴/자동 실행 즉시 반영
 - [ ] 화면/알림 설정 저장·잘못된 값 오류·되돌리기, 테스트 알림
